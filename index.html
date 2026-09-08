@@ -991,8 +991,33 @@ function renderSettings(){
       <button class="btn secondary" id="importBtn" style="margin-top:10px;">استيراد نسخة احتياطية</button>
       <input type="file" id="importFile" accept="application/json" style="display:none;">
       <button class="btn ghost" id="resetBtn">تصفير كل البيانات</button>
+    </div>
+    <div class="section-title"><span class="dot amber"></span>فحص وتصحيح</div>
+    <div class="card">
+      <div class="notice">يفحص هذا الفحص كل السيارات ويكشف أي سيارة عندها أكثر من عقد نشط بنفس الوقت (خطأ منطقي لازم يتصحح يدويًا).</div>
+      <button class="btn secondary" id="checkConflictsBtn">فحص تعارضات السيارات</button>
+      <div id="conflictsResult"></div>
     </div>`;
   document.getElementById('main').innerHTML = html;
+  document.getElementById('checkConflictsBtn').onclick = ()=>{
+    const box = document.getElementById('conflictsResult');
+    const byCarActive = {};
+    state.contracts.filter(c=>c.status==='active').forEach(c=>{
+      (byCarActive[c.carId] = byCarActive[c.carId]||[]).push(c);
+    });
+    const conflicts = Object.entries(byCarActive).filter(([carId,list])=>list.length>1);
+    if(conflicts.length===0){
+      box.innerHTML = `<div class="notice" style="background:#DCEEE2; border-color:#BFE0CB; color:var(--pine); margin-top:10px;">ما فيه أي تعارض — كل سيارة عندها عقد نشط واحد بحد أقصى.</div>`;
+    } else {
+      let h = `<div class="notice" style="background:#FBE3DA; border-color:#EFC9BA; color:var(--rust); margin-top:10px;">فيه ${conflicts.length} سيارة عندها أكثر من عقد نشط — لازم تراجعها وتنهي العقود الزايدة يدويًا:</div>`;
+      conflicts.forEach(([carId,list])=>{
+        h += `<div class="card" style="margin-top:8px;"><div class="t1">${carName(carId)}</div>`;
+        list.forEach(c=> h += `<div class="list-row" onclick="openContractDetail('${c.id}')" style="margin-top:6px;"><div><div class="main">${custName(c.customerId)}</div><div class="sub">بداية: ${fmtDate(c.startDate)}</div></div></div>`);
+        h += `</div>`;
+      });
+      box.innerHTML = h;
+    }
+  };
   document.getElementById('saveCurrency').onclick = ()=>{
     state.settings.currency = document.getElementById('f_currency').value.trim() || 'ريال';
     state.settings.companyName = document.getElementById('f_companyName').value.trim() || 'MOSTAFA ZOGLA Automotive';
@@ -1173,6 +1198,13 @@ function openCarForm(car){
     const plate = document.getElementById('f_carPlate').value.trim();
     const dailyRate = Number(document.getElementById('f_carRate').value)||0;
     const status = document.getElementById('f_carStatus').value;
+    if(editing){
+      const hasActiveContract = state.contracts.some(cc=>cc.carId===car.id && cc.status==='active');
+      if(hasActiveContract && status!=='rented'){
+        showToast('هذه السيارة لديها عقد تأجير نشط — أنهِ العقد أولًا قبل تغيير حالتها');
+        return;
+      }
+    }
     const ownerType = ownerTypeSel.value;
     let ownerName=null, ownerPhone=null, commissionPercent=null, ownerIdPhoto=null;
     if(ownerType==='individual'){
@@ -1189,6 +1221,8 @@ function openCarForm(car){
     saveData(); closeSheet(); render(); showToast(editing?'تم حفظ التعديلات':'تمت إضافة السيارة');
   };
   if(editing) document.getElementById('delCar').onclick = ()=>{
+    const hasActiveContract = state.contracts.some(cc=>cc.carId===car.id && cc.status==='active');
+    if(hasActiveContract){ showToast('لا يمكن حذف سيارة لديها عقد تأجير نشط — أنهِ العقد أولًا'); return; }
     if(!confirm('هل تريد حذف هذه السيارة نهائيًا؟')) return;
     requirePasswordThen('أدخل كلمة المرور لتأكيد حذف السيارة', ()=>{
       state.cars = state.cars.filter(c=>c.id!==car.id);
@@ -1220,6 +1254,8 @@ function openCustomerForm(cust){
     saveData(); closeSheet(); render(); showToast(editing?'تم حفظ التعديلات':'تمت إضافة العميل');
   };
   if(editing) document.getElementById('delCust').onclick = ()=>{
+    const hasActiveContract = state.contracts.some(cc=>cc.customerId===cust.id && cc.status==='active');
+    if(hasActiveContract){ showToast('لا يمكن حذف عميل لديه عقد تأجير نشط — أنهِ العقد أولًا'); return; }
     if(!confirm('هل تريد حذف هذا العميل نهائيًا؟')) return;
     requirePasswordThen('أدخل كلمة المرور لتأكيد حذف العميل', ()=>{
       state.customers = state.customers.filter(c=>c.id!==cust.id);
@@ -1236,7 +1272,12 @@ function openContractForm(contract, prefill){
   }
   const p = contract || prefill || {};
   const type = p.type || 'daily';
-  const carsOpts = state.cars.map(c=>`<option value="${c.id}" ${p.carId===c.id?'selected':''}>${c.name}${c.plate?' — '+c.plate:''}</option>`).join('');
+  const restrictToAvailable = !editing && !prefill;
+  const carsSource = restrictToAvailable ? state.cars.filter(c=>c.status==='available') : state.cars;
+  if(restrictToAvailable && carsSource.length===0){
+    showToast('لا توجد سيارات متاحة حاليًا — كلها مؤجرة أو بالصيانة'); return;
+  }
+  const carsOpts = carsSource.map(c=>`<option value="${c.id}" ${p.carId===c.id?'selected':''}>${c.name}${c.plate?' — '+c.plate:''}</option>`).join('');
   const custOpts = state.customers.map(c=>`<option value="${c.id}" ${p.customerId===c.id?'selected':''}>${c.name}</option>`).join('');
   sheet.innerHTML = `
     <div class="sheet-close">— عقد تأجير —</div>
@@ -1322,8 +1363,25 @@ function openContractForm(contract, prefill){
       payload.totalAmount = Number(document.getElementById('f_cTotal').value)||0;
     }
 
+    // منع تأجير نفس السيارة لأكثر من عميل بنفس الوقت
+    const carChanged = !editing || contract.carId !== carId;
+    if(carChanged){
+      const conflict = state.contracts.find(cc=> cc.carId===carId && cc.status==='active' && (!editing || cc.id!==contract.id));
+      if(conflict){
+        showToast('هذه السيارة مؤجرة حاليًا لعميل آخر — أنهِ عقدها الحالي أولًا');
+        return;
+      }
+    }
+
     if(editing){
+      const oldCarId = contract.carId;
       Object.assign(contract, payload, {paidAmount});
+      if(carChanged && contract.status==='active'){
+        const oldCar = state.cars.find(x=>x.id===oldCarId);
+        if(oldCar && !state.contracts.some(cc=>cc.carId===oldCarId && cc.status==='active')) oldCar.status='available';
+        const newCar = state.cars.find(x=>x.id===carId);
+        if(newCar) newCar.status='rented';
+      }
     } else {
       const id = uid();
       state.contracts.push(Object.assign({id, status:'active', paidAmount:0}, payload));
@@ -1339,6 +1397,10 @@ function openContractForm(contract, prefill){
   if(editing) document.getElementById('delContract').onclick = ()=>{
     if(!confirm('هل تريد حذف هذا العقد نهائيًا؟')) return;
     requirePasswordThen('أدخل كلمة المرور لتأكيد حذف العقد', ()=>{
+      if(contract.status==='active'){
+        const freedCar = state.cars.find(x=>x.id===contract.carId);
+        if(freedCar && !state.contracts.some(cc=>cc.id!==contract.id && cc.carId===contract.carId && cc.status==='active')) freedCar.status='available';
+      }
       state.contracts = state.contracts.filter(c=>c.id!==contract.id);
       saveData(); closeSheet(); render(); showToast('تم حذف العقد');
     });
@@ -1447,6 +1509,9 @@ function openBookingForm(){
     const endDate = document.getElementById('f_bEnd').value;
     if(!startDate||!endDate){ showToast('حدد التاريخين'); return; }
     if(endDate<startDate){ showToast('تاريخ النهاية قبل البداية!'); return; }
+    const overlap = (aS,aE,bS,bE)=> aS<=bE && bS<=aE;
+    const bookingConflict = state.bookings.some(b=> b.carId===carId && b.status!=='cancelled' && overlap(startDate,endDate,b.startDate,b.endDate));
+    if(bookingConflict){ showToast('هذه السيارة عندها حجز آخر بنفس الفترة'); return; }
     state.bookings.push({id:uid(), carId, customerId, startDate, endDate, status:'pending'});
     saveData(); closeSheet(); render(); showToast('تم حفظ الحجز');
   };
