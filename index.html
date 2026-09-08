@@ -958,6 +958,7 @@ function renderReports(){
 
 /* ================= الإعدادات ================= */
 function renderSettings(){
+  const hasPassword = !!state.settings.adminPasswordHash;
   let html = `
     <div class="section-title"><span class="dot ${cloudReady?'pine':'slate'}"></span>${cloudReady? 'المزامنة السحابية مفعّلة — بياناتك مشتركة بين كل الأجهزة':'المزامنة غير مفعّلة — البيانات محفوظة على هذا الجهاز فقط'}</div>
     <div class="section-title"><span class="dot slate"></span>عام</div>
@@ -965,6 +966,14 @@ function renderSettings(){
       <div class="field"><label>اسم الشركة/المعرض</label><input id="f_companyName" value="${state.settings.companyName||''}" placeholder="مثال: MOSTAFA ZOGLA Automotive"></div>
       <div class="field"><label>رمز العملة</label><input id="f_currency" value="${cur()}"></div>
       <button class="btn primary" id="saveCurrency">حفظ</button>
+    </div>
+    <div class="section-title"><span class="dot rust"></span>الحماية</div>
+    <div class="card">
+      ${hasPassword
+        ? `<div class="notice">كلمة المرور مفعّلة — لازم تدخلها لتصفير البيانات أو استيراد نسخة احتياطية.</div>`
+        : `<div class="notice">لا توجد كلمة مرور حاليًا — أي شخص يفتح التطبيق يقدر يصفّر البيانات أو يستبدلها باستيراد نسخة. ننصح بتفعيلها.</div>`}
+      <button class="btn secondary" id="setOrChangePassBtn">${hasPassword?'تغيير كلمة المرور':'تفعيل الحماية'}</button>
+      ${hasPassword?`<button class="btn ghost" id="removePassBtn">إلغاء الحماية</button>`:''}
     </div>
     <div class="section-title"><span class="dot slate"></span>البيانات</div>
     <div class="card">
@@ -979,6 +988,15 @@ function renderSettings(){
     state.settings.companyName = document.getElementById('f_companyName').value.trim() || 'MOSTAFA ZOGLA Automotive';
     saveData(); showToast('تم حفظ الإعدادات'); render();
   };
+  document.getElementById('setOrChangePassBtn').onclick = ()=>{
+    if(hasPassword) requirePasswordThen('أدخل كلمة المرور الحالية لتغييرها', openSetNewPasswordForm);
+    else openSetNewPasswordForm();
+  };
+  const removePassBtn = document.getElementById('removePassBtn');
+  if(removePassBtn) removePassBtn.onclick = ()=> requirePasswordThen('أدخل كلمة المرور الحالية لإلغاء الحماية', ()=>{
+    delete state.settings.adminPasswordHash;
+    saveData(); showToast('تم إلغاء الحماية'); render();
+  });
   document.getElementById('exportBtn').onclick = ()=>{
     const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
     const a = document.createElement('a');
@@ -991,18 +1009,75 @@ function renderSettings(){
     const file = e.target.files[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = ()=>{
-      try{
-        const data = JSON.parse(reader.result);
-        state = Object.assign(emptyState(), data);
+      let data;
+      try{ data = JSON.parse(reader.result); }
+      catch(err){ showToast('ملف غير صالح'); return; }
+      requirePasswordThen('أدخل كلمة المرور لتأكيد استيراد البيانات (سيستبدل كل شي حالي)', ()=>{
+        state = mergeState(data);
         saveData(); showToast('تم استيراد البيانات'); render();
-      }catch(err){ showToast('ملف غير صالح'); }
+      });
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
   document.getElementById('resetBtn').onclick = ()=>{
-    if(confirm('هل أنت متأكد من حذف كل البيانات؟ لا يمكن التراجع.')){
-      state = emptyState(); saveData(); showToast('تم تصفير البيانات'); render();
+    requirePasswordThen('أدخل كلمة المرور لتأكيد تصفير كل البيانات', ()=>{
+      if(confirm('هل أنت متأكد من حذف كل البيانات؟ لا يمكن التراجع.')){
+        state = emptyState(); saveData(); showToast('تم تصفير البيانات'); render();
+      }
+    });
+  };
+}
+
+/* ================= حماية الإجراءات الحساسة بكلمة مرور ================= */
+async function sha256(text){
+  try{
+    if(window.crypto && window.crypto.subtle){
+      const enc = new TextEncoder().encode(text);
+      const buf = await window.crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
+  }catch(e){}
+  // احتياطي بسيط لو التطبيق مفتوح من ملف محلي بدون بروتوكول آمن (crypto.subtle غير متاح)
+  let h = 0;
+  for(let i=0;i<text.length;i++){ h = (Math.imul(31,h) + text.charCodeAt(i)) | 0; }
+  return 'fallback_' + h;
+}
+function requirePasswordThen(promptText, actionCallback){
+  if(!state.settings.adminPasswordHash){ actionCallback(); return; }
+  sheet.innerHTML = `
+    <div class="sheet-close">— تأكيد كلمة المرور —</div>
+    <h2>${promptText}</h2>
+    <div class="field"><label>كلمة المرور</label><input type="password" id="f_verifyPass" placeholder="أدخل كلمة المرور"></div>
+    <button class="btn primary" id="verifyPassBtn">تأكيد</button>`;
+  overlay.classList.add('show');
+  setTimeout(()=>document.getElementById('f_verifyPass').focus(), 100);
+  document.getElementById('verifyPassBtn').onclick = async ()=>{
+    const val = document.getElementById('f_verifyPass').value;
+    const hash = await sha256(val);
+    if(hash === state.settings.adminPasswordHash){
+      closeSheet();
+      actionCallback();
+    } else {
+      showToast('كلمة المرور غير صحيحة');
+    }
+  };
+}
+function openSetNewPasswordForm(){
+  sheet.innerHTML = `
+    <div class="sheet-close">— كلمة مرور جديدة —</div>
+    <h2>تعيين كلمة مرور جديدة</h2>
+    <div class="field"><label>كلمة المرور الجديدة</label><input type="password" id="f_newPass1"></div>
+    <div class="field"><label>تأكيد كلمة المرور</label><input type="password" id="f_newPass2"></div>
+    <button class="btn primary" id="saveNewPass">حفظ</button>`;
+  overlay.classList.add('show');
+  document.getElementById('saveNewPass').onclick = async ()=>{
+    const p1 = document.getElementById('f_newPass1').value;
+    const p2 = document.getElementById('f_newPass2').value;
+    if(p1.length<4){ showToast('كلمة المرور قصيرة — ٤ أحرف على الأقل'); return; }
+    if(p1!==p2){ showToast('كلمتا المرور غير متطابقتين'); return; }
+    state.settings.adminPasswordHash = await sha256(p1);
+    saveData(); closeSheet(); render(); showToast('تم حفظ كلمة المرور');
   };
 }
 
