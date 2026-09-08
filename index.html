@@ -1015,16 +1015,18 @@ function renderSettings(){
   document.getElementById('main').innerHTML = html;
   const saveGatesBtn = document.getElementById('saveGatesBtn');
   if(saveGatesBtn) saveGatesBtn.onclick = ()=>{
-    state.settings.passwordGates = {
-      appLock: document.getElementById('gate_appLock').checked,
-      resetData: document.getElementById('gate_resetData').checked,
-      importBackup: document.getElementById('gate_importBackup').checked,
-      deleteCar: document.getElementById('gate_deleteCar').checked,
-      deleteCustomer: document.getElementById('gate_deleteCustomer').checked,
-      deleteContract: document.getElementById('gate_deleteContract').checked,
-      deleteBooking: document.getElementById('gate_deleteBooking').checked,
-    };
-    saveData(); showToast('تم حفظ إعدادات الحماية');
+    requirePasswordThen('أدخل كلمة المرور لتأكيد تغيير إعدادات الحماية', ()=>{
+      state.settings.passwordGates = {
+        appLock: document.getElementById('gate_appLock').checked,
+        resetData: document.getElementById('gate_resetData').checked,
+        importBackup: document.getElementById('gate_importBackup').checked,
+        deleteCar: document.getElementById('gate_deleteCar').checked,
+        deleteCustomer: document.getElementById('gate_deleteCustomer').checked,
+        deleteContract: document.getElementById('gate_deleteContract').checked,
+        deleteBooking: document.getElementById('gate_deleteBooking').checked,
+      };
+      saveData(); showToast('تم حفظ إعدادات الحماية'); render();
+    });
   };
   document.getElementById('checkConflictsBtn').onclick = ()=>{
     const box = document.getElementById('conflictsResult');
@@ -1093,6 +1095,20 @@ function renderSettings(){
 
 /* ================= حماية الإجراءات الحساسة بكلمة مرور ================= */
 async function sha256(text){
+  // خوارزمية واحدة ثابتة دايمًا (بغض النظر عن البيئة) عشان كلمة المرور تشتغل بنفس الطريقة
+  // سواء انفتح التطبيق من رابط آمن (https) أو من ملف محلي وقت الاختبار
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for(let i=0;i<text.length;i++){
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1>>>16), 2246822507) ^ Math.imul(h2 ^ (h2>>>13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2>>>16), 2246822507) ^ Math.imul(h1 ^ (h1>>>13), 3266489909);
+  return (h1>>>0).toString(16) + (h2>>>0).toString(16);
+}
+// توافق مع كلمات مرور محفوظة قبل هذا التحديث (كانت تُخزَّن بخوارزمية SHA-256 الحقيقية)
+async function legacySha256(text){
   try{
     if(window.crypto && window.crypto.subtle){
       const enc = new TextEncoder().encode(text);
@@ -1100,10 +1116,13 @@ async function sha256(text){
       return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
   }catch(e){}
-  // احتياطي بسيط لو التطبيق مفتوح من ملف محلي بدون بروتوكول آمن (crypto.subtle غير متاح)
-  let h = 0;
-  for(let i=0;i<text.length;i++){ h = (Math.imul(31,h) + text.charCodeAt(i)) | 0; }
-  return 'fallback_' + h;
+  return null;
+}
+async function verifyPassword(input){
+  const newHash = await sha256(input);
+  if(newHash === state.settings.adminPasswordHash) return true;
+  const oldHash = await legacySha256(input);
+  return !!oldHash && oldHash === state.settings.adminPasswordHash;
 }
 function requirePasswordThen(promptText, actionCallback){
   if(!state.settings.adminPasswordHash){ actionCallback(); return; }
@@ -1116,8 +1135,7 @@ function requirePasswordThen(promptText, actionCallback){
   setTimeout(()=>document.getElementById('f_verifyPass').focus(), 100);
   document.getElementById('verifyPassBtn').onclick = async ()=>{
     const val = document.getElementById('f_verifyPass').value;
-    const hash = await sha256(val);
-    if(hash === state.settings.adminPasswordHash){
+    if(await verifyPassword(val)){
       closeSheet();
       actionCallback();
     } else {
@@ -1311,7 +1329,9 @@ function openContractForm(contract, prefill){
   if(restrictToAvailable && carsSource.length===0){
     showToast('لا توجد سيارات متاحة حاليًا — كلها مؤجرة أو بالصيانة'); return;
   }
-  const carsOpts = carsSource.map(c=>`<option value="${c.id}" ${p.carId===c.id?'selected':''}>${c.name}${c.plate?' — '+c.plate:''}</option>`).join('');
+  const referencedCarMissing = p.carId && !state.cars.some(c=>c.id===p.carId);
+  const carsOpts = (referencedCarMissing ? `<option value="${p.carId}" selected disabled>سيارة محذوفة (لا تُعدّل إلا إذا غيّرت السيارة)</option>` : '')
+    + carsSource.map(c=>`<option value="${c.id}" ${p.carId===c.id?'selected':''}>${c.name}${c.plate?' — '+c.plate:''}</option>`).join('');
   const custOpts = state.customers.map(c=>`<option value="${c.id}" ${p.customerId===c.id?'selected':''}>${c.name}</option>`).join('');
   sheet.innerHTML = `
     <div class="sheet-close">— عقد تأجير —</div>
@@ -1685,8 +1705,7 @@ function showLockScreen(){
   setTimeout(()=>input.focus(), 200);
   async function tryUnlock(){
     const val = input.value;
-    const hash = await sha256(val);
-    if(hash === state.settings.adminPasswordHash){
+    if(await verifyPassword(val)){
       try{ sessionStorage.setItem(APP_LOCK_KEY, '1'); }catch(e){}
       el.style.display = 'none';
       startApp();
