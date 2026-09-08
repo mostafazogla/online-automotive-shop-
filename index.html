@@ -161,7 +161,7 @@
 /* ================= تخزين البيانات ================= */
 const OLD_KEY = 'carRentalAppData_v1';
 const STORAGE_KEY = 'carRentalAppData_v2';
-function emptyState(){ return { cars:[], customers:[], bookings:[], contracts:[], maintenance:[], expenses:[], payments:[], ownerPayouts:[], settings:{currency:'ريال', companyName:'MOSTAFA ZOGLA Automotive'} }; }
+function emptyState(){ return { cars:[], customers:[], bookings:[], contracts:[], maintenance:[], expenses:[], payments:[], ownerPayouts:[], settings:{currency:'ريال', companyName:'MOSTAFA ZOGLA Automotive', passwordGates:{appLock:true, resetData:true, importBackup:true, deleteCar:true, deleteCustomer:true, deleteContract:true, deleteBooking:true}} }; }
 function loadData(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -816,7 +816,7 @@ function renderBookings(){
 }
 function deleteBooking(id){
   if(!confirm('هل تريد حذف هذا الحجز؟')) return;
-  requirePasswordThen('أدخل كلمة المرور لتأكيد حذف الحجز', ()=>{
+  gatedAction('deleteBooking', 'أدخل كلمة المرور لتأكيد حذف الحجز', ()=>{
     state.bookings = state.bookings.filter(b=>b.id!==id); saveData(); render(); showToast('تم حذف الحجز');
   });
 }
@@ -969,6 +969,8 @@ function renderReports(){
 /* ================= الإعدادات ================= */
 function renderSettings(){
   const hasPassword = !!state.settings.adminPasswordHash;
+  const gates = Object.assign({appLock:true, resetData:true, importBackup:true, deleteCar:true, deleteCustomer:true, deleteContract:true, deleteBooking:true}, state.settings.passwordGates||{});
+  const gateRow = (key,label)=> `<label style="display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:13.5px;"><input type="checkbox" id="gate_${key}" ${gates[key]!==false?'checked':''} style="width:18px; height:18px;"> ${label}</label>`;
   let html = `
     <div class="section-title"><span class="dot ${cloudReady?'pine':'slate'}"></span>${cloudReady? 'المزامنة السحابية مفعّلة — بياناتك مشتركة بين كل الأجهزة':'المزامنة غير مفعّلة — البيانات محفوظة على هذا الجهاز فقط'}</div>
     <div class="section-title"><span class="dot slate"></span>عام</div>
@@ -980,11 +982,23 @@ function renderSettings(){
     <div class="section-title"><span class="dot rust"></span>الحماية</div>
     <div class="card">
       ${hasPassword
-        ? `<div class="notice">كلمة المرور مفعّلة — لازم تدخلها لتصفير البيانات أو استيراد نسخة احتياطية.</div>`
-        : `<div class="notice">لا توجد كلمة مرور حاليًا — أي شخص يفتح التطبيق يقدر يصفّر البيانات أو يستبدلها باستيراد نسخة. ننصح بتفعيلها.</div>`}
+        ? `<div class="notice">كلمة المرور مفعّلة. حدد تحت أي الإجراءات فعلًا تبيها تطلب كلمة المرور.</div>`
+        : `<div class="notice">لا توجد كلمة مرور حاليًا — أي شخص يفتح التطبيق يقدر يصفّر البيانات أو يستبدلها. ننصح بتفعيلها.</div>`}
       <button class="btn secondary" id="setOrChangePassBtn">${hasPassword?'تغيير كلمة المرور':'تفعيل الحماية'}</button>
-      ${hasPassword?`<button class="btn ghost" id="removePassBtn">إلغاء الحماية</button>`:''}
+      ${hasPassword?`<button class="btn ghost" id="removePassBtn">إلغاء الحماية نهائيًا</button>`:''}
     </div>
+    ${hasPassword ? `
+    <div class="card">
+      <div class="notice">تغيير كلمة المرور أو إلغاؤها بالكامل يطلب كلمة المرور دايمًا مهما اخترت هنا — هذي الخيارات تتحكم بس بالإجراءات التالية:</div>
+      ${gateRow('appLock','قفل فتح التطبيق بالكامل')}
+      ${gateRow('resetData','تصفير كل البيانات')}
+      ${gateRow('importBackup','استيراد نسخة احتياطية')}
+      ${gateRow('deleteCar','حذف سيارة')}
+      ${gateRow('deleteCustomer','حذف عميل')}
+      ${gateRow('deleteContract','حذف عقد')}
+      ${gateRow('deleteBooking','حذف حجز')}
+      <button class="btn primary" id="saveGatesBtn">حفظ إعدادات الحماية</button>
+    </div>` : ''}
     <div class="section-title"><span class="dot slate"></span>البيانات</div>
     <div class="card">
       <button class="btn secondary" id="exportBtn">تصدير نسخة احتياطية (JSON)</button>
@@ -999,6 +1013,19 @@ function renderSettings(){
       <div id="conflictsResult"></div>
     </div>`;
   document.getElementById('main').innerHTML = html;
+  const saveGatesBtn = document.getElementById('saveGatesBtn');
+  if(saveGatesBtn) saveGatesBtn.onclick = ()=>{
+    state.settings.passwordGates = {
+      appLock: document.getElementById('gate_appLock').checked,
+      resetData: document.getElementById('gate_resetData').checked,
+      importBackup: document.getElementById('gate_importBackup').checked,
+      deleteCar: document.getElementById('gate_deleteCar').checked,
+      deleteCustomer: document.getElementById('gate_deleteCustomer').checked,
+      deleteContract: document.getElementById('gate_deleteContract').checked,
+      deleteBooking: document.getElementById('gate_deleteBooking').checked,
+    };
+    saveData(); showToast('تم حفظ إعدادات الحماية');
+  };
   document.getElementById('checkConflictsBtn').onclick = ()=>{
     const box = document.getElementById('conflictsResult');
     const byCarActive = {};
@@ -1047,7 +1074,7 @@ function renderSettings(){
       let data;
       try{ data = JSON.parse(reader.result); }
       catch(err){ showToast('ملف غير صالح'); return; }
-      requirePasswordThen('أدخل كلمة المرور لتأكيد استيراد البيانات (سيستبدل كل شي حالي)', ()=>{
+      gatedAction('importBackup', 'أدخل كلمة المرور لتأكيد استيراد البيانات (سيستبدل كل شي حالي)', ()=>{
         state = mergeState(data);
         saveData(); showToast('تم استيراد البيانات'); render();
       });
@@ -1056,7 +1083,7 @@ function renderSettings(){
     e.target.value = '';
   };
   document.getElementById('resetBtn').onclick = ()=>{
-    requirePasswordThen('أدخل كلمة المرور لتأكيد تصفير كل البيانات', ()=>{
+    gatedAction('resetData', 'أدخل كلمة المرور لتأكيد تصفير كل البيانات', ()=>{
       if(confirm('هل أنت متأكد من حذف كل البيانات؟ لا يمكن التراجع.')){
         state = emptyState(); saveData(); showToast('تم تصفير البيانات'); render();
       }
@@ -1097,6 +1124,13 @@ function requirePasswordThen(promptText, actionCallback){
       showToast('كلمة المرور غير صحيحة');
     }
   };
+}
+/* إجراء "قابل للتحكم" — يطلب كلمة المرور فقط لو مفتاحه مفعّل من إعدادات الحماية */
+function gatedAction(gateKey, promptText, actionCallback){
+  const gates = state.settings.passwordGates || {};
+  const gateOn = gates[gateKey] !== false;
+  if(gateOn) requirePasswordThen(promptText, actionCallback);
+  else actionCallback();
 }
 function openSetNewPasswordForm(){
   sheet.innerHTML = `
@@ -1224,7 +1258,7 @@ function openCarForm(car){
     const hasActiveContract = state.contracts.some(cc=>cc.carId===car.id && cc.status==='active');
     if(hasActiveContract){ showToast('لا يمكن حذف سيارة لديها عقد تأجير نشط — أنهِ العقد أولًا'); return; }
     if(!confirm('هل تريد حذف هذه السيارة نهائيًا؟')) return;
-    requirePasswordThen('أدخل كلمة المرور لتأكيد حذف السيارة', ()=>{
+    gatedAction('deleteCar', 'أدخل كلمة المرور لتأكيد حذف السيارة', ()=>{
       state.cars = state.cars.filter(c=>c.id!==car.id);
       saveData(); closeSheet(); render(); showToast('تم حذف السيارة');
     });
@@ -1257,7 +1291,7 @@ function openCustomerForm(cust){
     const hasActiveContract = state.contracts.some(cc=>cc.customerId===cust.id && cc.status==='active');
     if(hasActiveContract){ showToast('لا يمكن حذف عميل لديه عقد تأجير نشط — أنهِ العقد أولًا'); return; }
     if(!confirm('هل تريد حذف هذا العميل نهائيًا؟')) return;
-    requirePasswordThen('أدخل كلمة المرور لتأكيد حذف العميل', ()=>{
+    gatedAction('deleteCustomer', 'أدخل كلمة المرور لتأكيد حذف العميل', ()=>{
       state.customers = state.customers.filter(c=>c.id!==cust.id);
       saveData(); closeSheet(); render(); showToast('تم حذف العميل');
     });
@@ -1396,7 +1430,7 @@ function openContractForm(contract, prefill){
   };
   if(editing) document.getElementById('delContract').onclick = ()=>{
     if(!confirm('هل تريد حذف هذا العقد نهائيًا؟')) return;
-    requirePasswordThen('أدخل كلمة المرور لتأكيد حذف العقد', ()=>{
+    gatedAction('deleteContract', 'أدخل كلمة المرور لتأكيد حذف العقد', ()=>{
       if(contract.status==='active'){
         const freedCar = state.cars.find(x=>x.id===contract.carId);
         if(freedCar && !state.contracts.some(cc=>cc.id!==contract.id && cc.carId===contract.carId && cc.status==='active')) freedCar.status='available';
@@ -1667,7 +1701,8 @@ function showLockScreen(){
 }
 let alreadyUnlocked = false;
 try{ alreadyUnlocked = sessionStorage.getItem(APP_LOCK_KEY)==='1'; }catch(e){}
-if(state.settings.adminPasswordHash && !alreadyUnlocked){
+const appLockGateOn = !state.settings.passwordGates || state.settings.passwordGates.appLock !== false;
+if(state.settings.adminPasswordHash && appLockGateOn && !alreadyUnlocked){
   showLockScreen();
 } else {
   startApp();
