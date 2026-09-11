@@ -232,7 +232,9 @@ function initCloudSync(){
 }
 function listenCloud(){
   try{
+    if(activeEventSource){ activeEventSource.close(); activeEventSource=null; }
     const es = new EventSource(FIREBASE_DB_URL + 'state.json');
+    activeEventSource = es;
     es.onopen = ()=>{ cloudReady = true; if(currentView==='settings') render(); };
     es.addEventListener('put', (e)=>{
       try{
@@ -247,6 +249,18 @@ function listenCloud(){
     es.onerror = ()=>{ cloudReady = false; if(currentView==='settings') render(); };
   }catch(e){}
 }
+let activeEventSource = null;
+/* توفير موارد الجهاز: نقفل الاتصال المستمر بالسحابة وقت ما التطبيق يكون بالخلفية (مو مفتوح على الشاشة)، ونعيد فتحه ونجيب آخر تحديث فور الرجوع له */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    if(activeEventSource){ activeEventSource.close(); activeEventSource=null; }
+  } else {
+    fetch(FIREBASE_DB_URL + 'state.json').then(r=>r.json()).then(data=>{
+      if(data){ state = mergeState(data); saveLocalOnly(); render(); }
+      listenCloud();
+    }).catch(()=> listenCloud());
+  }
+});
 
 /* ================= أدوات تاريخ ================= */
 function localDateStr(d){
@@ -341,6 +355,7 @@ function dailyOpenSummary(contract){
 let notifiedKeys = new Set(JSON.parse(localStorage.getItem('notifiedKeys')||'[]'));
 function askNotifPermission(){ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }
 function checkAndNotify(){
+  if(document.hidden) return;
   if(!('Notification' in window) || Notification.permission!=='granted') return;
   state.contracts.forEach(c=>{
     if(c.status!=='active') return;
