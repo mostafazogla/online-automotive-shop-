@@ -249,7 +249,13 @@ function listenCloud(){
 }
 
 /* ================= أدوات تاريخ ================= */
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function localDateStr(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function todayStr(){ return localDateStr(new Date()); }
 function monthStr(){ return todayStr().slice(0,7); }
 function dayDiff(dateStr){ const a=new Date(todayStr()+'T00:00:00'), b=new Date(dateStr+'T00:00:00'); return Math.round((b-a)/86400000); }
 function fmtDate(dateStr){ return new Date(dateStr+'T00:00:00').toLocaleDateString('ar-EG',{day:'numeric', month:'long'}); }
@@ -308,8 +314,8 @@ function monthlyCycle(contract, ref){
   const cycleNumber = Math.max(0, Math.floor(daysSinceStart / CYCLE_DAYS));
   const cycleStart = new Date(start.getTime() + cycleNumber*CYCLE_DAYS*86400000);
   const cycleEnd = new Date(cycleStart.getTime() + CYCLE_DAYS*86400000);
-  const cycleStartStr = cycleStart.toISOString().slice(0,10);
-  const cycleEndStr = cycleEnd.toISOString().slice(0,10);
+  const cycleStartStr = localDateStr(cycleStart);
+  const cycleEndStr = localDateStr(cycleEnd);
   const paid = state.payments.filter(p=>p.contractId===contract.id && p.date>=cycleStartStr && p.date<cycleEndStr).reduce((s,p)=>s+Number(p.amount||0),0);
   const rate = Number(contract.monthlyRate||0);
   return {cycleStart:cycleStartStr, cycleEnd:cycleEndStr, paid, isPaid: rate>0 && paid>=rate};
