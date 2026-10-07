@@ -222,26 +222,40 @@ function syncToCloud(){
       method:'PUT',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(state)
-    }).catch(()=>{});
+    }).then(r=>{
+      if(!r.ok){ cloudReady=false; if(currentView==='settings') render(); }
+    }).catch(()=>{ cloudReady=false; if(currentView==='settings') render(); });
   }, 400);
 }
 function saveLocalOnly(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} }
+/* مهم: لا نعتبر أي رد "بيانات صالحة" إلا لو كان الطلب نجح فعليًا (r.ok) وكان شكل البيانات JSON سليم (object عادي بدون خطأ) — هذا يمنع رسالة رفض من القاعدة (مثل صلاحية منتهية) من إفراغ البيانات المحلية بالخطأ */
+function isValidCloudPayload(data){
+  return data && typeof data==='object' && !Array.isArray(data) && typeof data.error==='undefined';
+}
 function initCloudSync(){
   fetch(FIREBASE_DB_URL + 'state.json')
-    .then(r=>r.json())
-    .then(data=>{
+    .then(r=> r.json().then(data=>({ok:r.ok, data})) )
+    .then(({ok,data})=>{
+      if(!ok){
+        cloudReady = false;
+        if(currentView==='settings') render();
+        listenCloud();
+        return;
+      }
       cloudReady = true;
-      if(data){
+      if(isValidCloudPayload(data)){
         state = mergeState(data);
         saveLocalOnly();
         applyTheme();
         render();
-      } else {
+      } else if(data===null){
+        // قاعدة فاضية فعلًا (أول استخدام) — نبذرها ببياناتنا المحلية
         fetch(FIREBASE_DB_URL + 'state.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(state)}).catch(()=>{});
       }
+      // أي شكل بيانات غريب آخر (خطأ مثلاً) → تجاهله ولا تلمس state المحلي إطلاقًا
       listenCloud();
     })
-    .catch(()=>{ listenCloud(); });
+    .catch(()=>{ cloudReady=false; if(currentView==='settings') render(); listenCloud(); });
 }
 function listenCloud(){
   try{
@@ -252,7 +266,7 @@ function listenCloud(){
     es.addEventListener('put', (e)=>{
       try{
         const payload = JSON.parse(e.data);
-        if(payload.path === '/' && payload.data){
+        if(payload.path === '/' && isValidCloudPayload(payload.data)){
           state = mergeState(payload.data);
           saveLocalOnly();
           applyTheme();
@@ -269,10 +283,13 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.hidden){
     if(activeEventSource){ activeEventSource.close(); activeEventSource=null; }
   } else {
-    fetch(FIREBASE_DB_URL + 'state.json').then(r=>r.json()).then(data=>{
-      if(data){ state = mergeState(data); saveLocalOnly(); applyTheme(); render(); }
-      listenCloud();
-    }).catch(()=> listenCloud());
+    fetch(FIREBASE_DB_URL + 'state.json')
+      .then(r=> r.json().then(data=>({ok:r.ok, data})) )
+      .then(({ok,data})=>{
+        cloudReady = ok;
+        if(ok && isValidCloudPayload(data)){ state = mergeState(data); saveLocalOnly(); applyTheme(); render(); }
+        listenCloud();
+      }).catch(()=>{ cloudReady=false; listenCloud(); });
   }
 });
 
