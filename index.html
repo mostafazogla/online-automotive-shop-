@@ -1232,8 +1232,39 @@ function renderSettings(){
       <div class="notice">يفحص هذا الفحص كل السيارات ويكشف أي سيارة عندها أكثر من عقد نشط بنفس الوقت (خطأ منطقي لازم يتصحح يدويًا).</div>
       <button class="btn secondary" id="checkConflictsBtn">فحص تعارضات السيارات</button>
       <div id="conflictsResult"></div>
+    </div>
+    <div class="card">
+      <div class="notice">تشخيص حساب التواريخ — يوريك بالضبط وش الجهاز يحسب خطوة بخطوة (لو فيه عقد شهري مشكوك فيه).</div>
+      <button class="btn secondary" id="dateDebugBtn">تشخيص تاريخ عقد شهري</button>
+      <div id="dateDebugResult"></div>
     </div>`;
   document.getElementById('main').innerHTML = html;
+  const dateDebugBtn = document.getElementById('dateDebugBtn');
+  if(dateDebugBtn) dateDebugBtn.onclick = ()=>{
+    const box = document.getElementById('dateDebugResult');
+    const monthlyContracts = state.contracts.filter(c=>c.type==='monthly');
+    if(monthlyContracts.length===0){ box.innerHTML = `<div class="notice" style="margin-top:10px;">ما فيه عقود شهرية حاليًا.</div>`; return; }
+    const now = new Date();
+    let h = `<div class="notice" style="margin-top:10px; font-family:monospace; font-size:11px; line-height:2; text-align:left; direction:ltr;">`;
+    h += `device now (full): ${now.toString()}<br>`;
+    h += `device timezone offset (minutes from UTC): ${now.getTimezoneOffset()}<br>`;
+    h += `todayStr() result: ${todayStr()}<br><br>`;
+    monthlyContracts.forEach(c=>{
+      const start = new Date(c.startDate+'T00:00:00');
+      const nowRef = new Date(todayStr()+'T00:00:00');
+      const daysSinceStart = Math.floor((nowRef-start)/86400000);
+      const cycleNumber = Math.max(0, Math.floor(daysSinceStart/30));
+      const cyc = monthlyCycle(c);
+      h += `--- ${carName(c.carId)} / ${custName(c.customerId)} ---<br>`;
+      h += `stored startDate (raw): "${c.startDate}"<br>`;
+      h += `daysSinceStart: ${daysSinceStart}<br>`;
+      h += `cycleNumber: ${cycleNumber}<br>`;
+      h += `computed cycleStart: ${cyc.cycleStart}<br>`;
+      h += `computed cycleEnd: ${cyc.cycleEnd}<br><br>`;
+    });
+    h += `</div>`;
+    box.innerHTML = h;
+  };
   const saveGatesBtn = document.getElementById('saveGatesBtn');
   if(saveGatesBtn) saveGatesBtn.onclick = ()=>{
     requirePasswordThen('أدخل كلمة المرور لتأكيد تغيير إعدادات الحماية', ()=>{
