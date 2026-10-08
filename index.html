@@ -1569,6 +1569,7 @@ function openContractForm(contract, prefill){
     <div class="field"><label>السيارة</label><select id="f_cCar">${carsOpts}</select></div>
     <div class="field"><label>العميل</label><select id="f_cCust">${custOpts}</select></div>
     <div class="field"><label id="f_cStartLabel">تاريخ التسليم</label><input type="date" id="f_cStart" value="${p.startDate||todayStr()}"></div>
+    ${editing && (type==='monthly'||type==='daily_open') ? '<div class="notice">⚠️ تاريخ البداية هو أساس حساب كل الدورات القادمة — غيّره بس لو متأكد إنه غلط، لأن أي تغيير يحرّك كل التجديدات اللي بعده.</div>' : ''}
 
     <div id="dailyFields">
       <div class="row2">
@@ -1620,6 +1621,10 @@ function openContractForm(contract, prefill){
     const customerId = document.getElementById('f_cCust').value;
     const startDate = document.getElementById('f_cStart').value;
     if(!startDate){ showToast('حدد تاريخ البداية'); return; }
+    if(editing && (contract.type==='monthly'||contract.type==='daily_open') && contract.startDate!==startDate){
+      const ok = confirm('أنت بصدد تغيير تاريخ بداية عقد شهري/مفتوح — هذا يغيّر حساب كل الدورات والتجديدات القادمة. متأكد تبي تكمل؟');
+      if(!ok) return;
+    }
     const startOdoVal = document.getElementById('f_cStartOdo').value;
     const kmLimitVal = document.getElementById('f_cKmLimit').value;
     const startOdometer = startOdoVal? Number(startOdoVal) : null;
