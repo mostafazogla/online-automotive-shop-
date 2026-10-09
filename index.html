@@ -1191,6 +1191,7 @@ function renderSettings(){
   const gates = Object.assign({appLock:true, resetData:true, importBackup:true, deleteCar:true, deleteCustomer:true, deleteContract:true, deleteBooking:true, deleteInventory:true}, state.settings.passwordGates||{});
   const gateRow = (key,label)=> `<label style="display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:13.5px;"><input type="checkbox" id="gate_${key}" ${gates[key]!==false?'checked':''} style="width:18px; height:18px;"> ${label}</label>`;
   let html = `
+    <div class="notice" style="background:#1C2333; color:#fff; border:none; text-align:center; font-weight:700; font-family:monospace;">إصدار التطبيق: ${APP_BUILD_VERSION}</div>
     <div class="section-title"><span class="dot ${cloudReady?'pine':'slate'}"></span>${cloudReady? 'المزامنة السحابية مفعّلة — بياناتك مشتركة بين كل الأجهزة':'المزامنة غير مفعّلة — البيانات محفوظة على هذا الجهاز فقط'}</div>
     <div class="section-title"><span class="dot slate"></span>عام</div>
     <div class="card">
@@ -1246,6 +1247,7 @@ function renderSettings(){
     if(monthlyContracts.length===0){ box.innerHTML = `<div class="notice" style="margin-top:10px;">ما فيه عقود شهرية حاليًا.</div>`; return; }
     const now = new Date();
     let h = `<div class="notice" style="margin-top:10px; font-family:monospace; font-size:11px; line-height:2; text-align:left; direction:ltr;">`;
+    h += `APP_BUILD_VERSION: ${APP_BUILD_VERSION}<br>`;
     h += `device now (full): ${now.toString()}<br>`;
     h += `device timezone offset (minutes from UTC): ${now.getTimezoneOffset()}<br>`;
     h += `todayStr() result: ${todayStr()}<br><br>`;
@@ -2029,6 +2031,7 @@ function applyTheme(){
   document.body.classList.toggle('dark-mode', !!state.settings.darkMode);
 }
 applyTheme();
+const APP_BUILD_VERSION = 'BUILD-2026-10-09-C';
 const APP_LOCK_KEY = 'carRentalUnlocked_v1';
 function startApp(){
   setView('home');
