@@ -817,21 +817,56 @@ function renderReturn(){
 function openReturnForm(id){
   const c = state.contracts.find(x=>x.id===id);
   if(!c) return;
+  const lateDaysNow = Math.max(0, -dayDiff(c.endDate));
   sheet.innerHTML = `
     <div class="sheet-close">— تسجيل إرجاع —</div>
     <h2>${carName(c.carId)}</h2>
     ${c.startOdometer? `<div class="field"><label>قراءة العداد عند التسليم</label><input value="${c.startOdometer}" disabled></div>`:''}
     <div class="field"><label>قراءة العداد عند الاستلام (اختياري)</label><input type="number" id="f_endOdo" placeholder="مثال: 45230"></div>
+    ${photoFieldHTML('returnCondition', 'حالة السيارة عند الاستلام (صورة)', null, 130)}
+    <div class="field"><label>ملاحظات حالة السيارة عند الاستلام</label><input id="f_returnNotes" placeholder="مثال: بدون أضرار جديدة"></div>
+    ${lateDaysNow>0? `<div class="notice" style="background:#FBE3DA; border-color:#EFC9BA; color:var(--rust);">السيارة متأخرة ${lateDaysNow} يوم عن الموعد — بتُحسب غرامة تلقائيًا حسب سعر الغرامة المحدد بالعقد.</div>`:''}
+    ${c.depositAmount && c.depositStatus==='held'? `<div class="notice">وديعة محتجزة: ${fmtMoney(c.depositAmount)} — تقدر تستردها من تفاصيل العقد بعد الإرجاع.</div>`:''}
     <button class="btn primary" id="confirmReturn">تأكيد الإرجاع</button>`;
   overlay.classList.add('show');
+  let currentReturnPhoto = null;
+  wirePhotoField('returnCondition', (v)=>{ currentReturnPhoto = v; });
   document.getElementById('confirmReturn').onclick = ()=>{
     const endOdo = document.getElementById('f_endOdo').value;
     if(endOdo) c.endOdometer = Number(endOdo);
+    c.returnConditionPhoto = currentReturnPhoto;
+    c.returnConditionNotes = document.getElementById('f_returnNotes').value.trim();
+
+    let extraCharges = 0;
+    let chargeNotes = [];
+    if(c.kmLimit && c.startOdometer!=null && c.endOdometer!=null){
+      const actualKm = c.endOdometer - c.startOdometer;
+      const extraKm = Math.max(0, actualKm - Number(c.kmLimit));
+      if(extraKm>0 && c.extraKmRate){
+        const extraKmCharge = extraKm * Number(c.extraKmRate);
+        c.extraKmCharge = extraKmCharge;
+        extraCharges += extraKmCharge;
+        chargeNotes.push(`${extraKm} كم زيادة × ${fmtMoney(c.extraKmRate)} = ${fmtMoney(extraKmCharge)}`);
+      }
+    }
+    if(lateDaysNow>0){
+      const rate = c.lateFeeRate!=null ? Number(c.lateFeeRate) : Number(c.dailyRate||0);
+      if(rate>0){
+        const lateFeeCharge = lateDaysNow * rate;
+        c.lateFeeCharge = lateFeeCharge;
+        extraCharges += lateFeeCharge;
+        chargeNotes.push(`غرامة تأخير ${lateDaysNow} يوم × ${fmtMoney(rate)} = ${fmtMoney(lateFeeCharge)}`);
+      }
+    }
+    if(extraCharges>0){
+      c.totalAmount = Number(c.totalAmount||0) + extraCharges;
+    }
+
     c.status='completed';
     const car = state.cars.find(x=>x.id===c.carId);
     if(car){ car.status='available'; if(c.endOdometer) car.currentOdometer=c.endOdometer; }
     saveData(); closeSheet(); render();
-    showToast('تم تسجيل إرجاع السيارة');
+    showToast(extraCharges>0 ? `تم الإرجاع — أُضيف ${fmtMoney(extraCharges)} رسوم إضافية` : 'تم تسجيل إرجاع السيارة');
   };
 }
 function endMonthlyContract(id){
@@ -860,21 +895,38 @@ function openOpenRentalEndForm(id){
     </div>
     ${c.startOdometer? `<div class="field"><label>قراءة العداد عند التسليم</label><input value="${c.startOdometer}" disabled></div>`:''}
     <div class="field"><label>قراءة العداد عند الاستلام (اختياري)</label><input type="number" id="f_endOdoOpen" placeholder="مثال: 45230"></div>
+    ${photoFieldHTML('returnConditionOpen', 'حالة السيارة عند الاستلام (صورة)', null, 130)}
+    <div class="field"><label>ملاحظات حالة السيارة عند الاستلام</label><input id="f_returnNotesOpen" placeholder="مثال: بدون أضرار جديدة"></div>
+    ${c.depositAmount && c.depositStatus==='held'? `<div class="notice">وديعة محتجزة: ${fmtMoney(c.depositAmount)} — تقدر تستردها من تفاصيل العقد بعد الإنهاء.</div>`:''}
     <div class="field"><label>تسجيل دفعة تسوية نهائية الآن (اختياري)</label><input type="number" id="f_finalPay" value="${s.balance>0? s.balance : ''}"></div>
     <button class="btn primary" id="confirmEndOpen">إنهاء العقد وتسجيل التصفية</button>`;
   overlay.classList.add('show');
+  let currentReturnPhotoOpen = null;
+  wirePhotoField('returnConditionOpen', (v)=>{ currentReturnPhotoOpen = v; });
   document.getElementById('confirmEndOpen').onclick = ()=>{
     const endOdo = document.getElementById('f_endOdoOpen').value;
     if(endOdo) c.endOdometer = Number(endOdo);
+    c.returnConditionPhoto = currentReturnPhotoOpen;
+    c.returnConditionNotes = document.getElementById('f_returnNotesOpen').value.trim();
+    let extraCharges = 0;
+    if(c.kmLimit && c.startOdometer!=null && c.endOdometer!=null){
+      const actualKm = c.endOdometer - c.startOdometer;
+      const extraKm = Math.max(0, actualKm - Number(c.kmLimit));
+      if(extraKm>0 && c.extraKmRate){
+        const extraKmCharge = extraKm * Number(c.extraKmRate);
+        c.extraKmCharge = extraKmCharge;
+        extraCharges += extraKmCharge;
+      }
+    }
     const finalPay = Number(document.getElementById('f_finalPay').value)||0;
     if(finalPay>0) state.payments.push({id:uid(), contractId:c.id, amount:finalPay, date:todayStr()});
     c.status = 'completed';
     c.endDate = todayStr();
-    c.totalAmount = s.totalDue;
+    c.totalAmount = s.totalDue + extraCharges;
     const car = state.cars.find(x=>x.id===c.carId);
     if(car){ car.status='available'; if(c.endOdometer) car.currentOdometer=c.endOdometer; }
     saveData(); closeSheet(); render();
-    showToast('تم إنهاء العقد وتسجيل التصفية');
+    showToast(extraCharges>0 ? `تم الإنهاء — أُضيف ${fmtMoney(extraCharges)} رسوم كيلومترات زائدة` : 'تم إنهاء العقد وتسجيل التصفية');
   };
 }
 
@@ -1591,9 +1643,18 @@ function openContractForm(contract, prefill){
   const carsOpts = (referencedCarMissing ? `<option value="${p.carId}" selected disabled>سيارة محذوفة (لا تُعدّل إلا إذا غيّرت السيارة)</option>` : '')
     + carsSource.map(c=>`<option value="${c.id}" ${p.carId===c.id?'selected':''}>${c.name}${c.plate?' — '+c.plate:''}</option>`).join('');
   const custOpts = state.customers.map(c=>`<option value="${c.id}" ${p.customerId===c.id?'selected':''}>${c.name}</option>`).join('');
+  const needsDepositSettlement = editing && contract.status==='completed' && contract.depositAmount>0 && contract.depositStatus==='held';
   sheet.innerHTML = `
     <div class="sheet-close">— عقد تأجير —</div>
     <h2>${editing?'تعديل عقد':'إنشاء عقد تأجير'}</h2>
+    ${needsDepositSettlement ? `
+    <div class="card" style="border-color:var(--amber); background:#FBEAD3;">
+      <div class="t1" style="margin-bottom:4px;">وديعة محتجزة: ${fmtMoney(contract.depositAmount)}</div>
+      <div class="t2" style="margin-bottom:10px;">العقد منتهي — حدد وش تبي تسوي بالوديعة</div>
+      <button class="btn primary" id="refundFullBtn" style="background:var(--pine);">استرجاع الوديعة بالكامل للعميل</button>
+      <button class="btn secondary" id="refundPartialBtn">استرجاع جزء وخصم الباقي (أضرار)</button>
+      <button class="btn ghost" id="forfeitBtn" style="color:var(--rust);">احتجاز الوديعة بالكامل</button>
+    </div>` : ''}
     <div class="field"><label>نوع العقد</label><select id="f_cType" ${editing?'disabled':''}>
       <option value="daily" ${type==='daily'?'selected':''}>يومي (بتاريخ استلام محدد)</option>
       <option value="daily_open" ${type==='daily_open'?'selected':''}>يومي مفتوح (يتجدد يوميًا حتى الإنهاء)</option>
@@ -1610,6 +1671,7 @@ function openContractForm(contract, prefill){
         <div class="field"><label>السعر اليومي (${cur()})</label><input type="number" id="f_cRate" value="${p.dailyRate||''}"></div>
       </div>
       <div class="field"><label>الإجمالي (${cur()})</label><input type="number" id="f_cTotal" value="${p.totalAmount||''}"></div>
+      <div class="field"><label>سعر غرامة التأخير لليوم (${cur()}) — اختياري</label><input type="number" id="f_cLateFeeRate" value="${p.lateFeeRate!=null?p.lateFeeRate:''}" placeholder="افتراضيًا = السعر اليومي"></div>
     </div>
 
     <div id="openFields" style="display:none;">
@@ -1626,8 +1688,15 @@ function openContractForm(contract, prefill){
       <div class="field"><label>قراءة العداد عند التسليم (اختياري)</label><input type="number" id="f_cStartOdo" value="${p.startOdometer||''}"></div>
       <div class="field"><label>الحد الأقصى للكيلومترات (اختياري)</label><input type="number" id="f_cKmLimit" value="${p.kmLimit||''}"></div>
     </div>
+    <div class="field"><label>سعر الكيلومتر الزائد (${cur()}) — اختياري</label><input type="number" id="f_cExtraKmRate" value="${p.extraKmRate||''}" placeholder="يُحسب لو تجاوز الحد الأقصى"></div>
+
+    <div class="field"><label>وديعة التأمين (${cur()}) — اختياري</label><input type="number" id="f_cDeposit" value="${p.depositAmount||''}" placeholder="مبلغ قابل للاسترداد عند الإرجاع"></div>
 
     <div class="field"><label>المدفوع مقدمًا (${cur()})</label><input type="number" id="f_cPaid" value="${editing? (p.paidAmount||0) : 0}"></div>
+
+    ${photoFieldHTML('pickupCondition', 'حالة السيارة عند التسليم (صورة)', p.pickupConditionPhoto||null, 130)}
+    <div class="field"><label>ملاحظات حالة السيارة عند التسليم (خدوش، أضرار...)</label><input id="f_cPickupNotes" value="${p.pickupConditionNotes||''}" placeholder="مثال: خدش بسيط بالباب الأيمن"></div>
+
     <button class="btn primary" id="saveContract">${editing?'حفظ التعديلات':'إنشاء العقد'}</button>
     ${editing?`<button class="btn ghost" id="delContract">حذف العقد</button>`:''}`;
   overlay.classList.add('show');
@@ -1648,6 +1717,41 @@ function openContractForm(contract, prefill){
   typeSel.addEventListener('change', toggleType);
   toggleType();
 
+  let currentPickupPhoto = p.pickupConditionPhoto || null;
+  wirePhotoField('pickupCondition', (v)=>{ currentPickupPhoto = v; });
+
+  if(needsDepositSettlement){
+    document.getElementById('refundFullBtn').onclick = ()=>{
+      contract.depositStatus = 'refunded';
+      contract.depositRefunded = contract.depositAmount;
+      saveData(); closeSheet(); render(); showToast('تم تسجيل استرجاع الوديعة بالكامل');
+    };
+    document.getElementById('refundPartialBtn').onclick = ()=>{
+      const keepStr = prompt('كم المبلغ اللي تبي تخصمه من الوديعة (مقابل أضرار)؟', '0');
+      if(keepStr===null) return;
+      const keep = Number(keepStr)||0;
+      if(keep<0 || keep>contract.depositAmount){ showToast('مبلغ غير صحيح'); return; }
+      contract.depositStatus = 'partial';
+      contract.depositRefunded = contract.depositAmount - keep;
+      contract.depositKept = keep;
+      if(keep>0){
+        state.expenses = state.expenses || [];
+        // المبلغ المحتجز من الوديعة يُحتسب كإيراد تعويض أضرار، لا كمصروف — يُسجَّل كدفعة على العقد
+        state.payments.push({id:uid(), contractId:contract.id, amount:keep, date:todayStr()});
+        contract.paidAmount = Number(contract.paidAmount||0) + keep;
+      }
+      saveData(); closeSheet(); render(); showToast('تم تسجيل التسوية الجزئية للوديعة');
+    };
+    document.getElementById('forfeitBtn').onclick = ()=>{
+      if(!confirm('هل أنت متأكد من احتجاز الوديعة بالكامل؟')) return;
+      contract.depositStatus = 'forfeited';
+      contract.depositRefunded = 0;
+      state.payments.push({id:uid(), contractId:contract.id, amount:contract.depositAmount, date:todayStr()});
+      contract.paidAmount = Number(contract.paidAmount||0) + Number(contract.depositAmount);
+      saveData(); closeSheet(); render(); showToast('تم تسجيل احتجاز الوديعة بالكامل');
+    };
+  }
+
   document.getElementById('saveContract').onclick = ()=>{
     const cType = typeSel.value;
     const carId = document.getElementById('f_cCar').value;
@@ -1662,9 +1766,15 @@ function openContractForm(contract, prefill){
     const kmLimitVal = document.getElementById('f_cKmLimit').value;
     const startOdometer = startOdoVal? Number(startOdoVal) : null;
     const kmLimit = kmLimitVal? Number(kmLimitVal) : null;
+    const extraKmRateVal = document.getElementById('f_cExtraKmRate').value;
+    const extraKmRate = extraKmRateVal? Number(extraKmRateVal) : 0;
+    const depositVal = document.getElementById('f_cDeposit').value;
+    const depositAmount = depositVal? Number(depositVal) : 0;
+    const pickupConditionNotes = document.getElementById('f_cPickupNotes').value.trim();
     const paidAmount = Number(document.getElementById('f_cPaid').value)||0;
 
-    let payload = {carId, customerId, startDate, type:cType, startOdometer, kmLimit};
+    let payload = {carId, customerId, startDate, type:cType, startOdometer, kmLimit, extraKmRate, depositAmount, pickupConditionNotes, pickupConditionPhoto: currentPickupPhoto};
+    if(!editing) payload.depositStatus = depositAmount>0 ? 'held' : null;
     if(cType==='monthly'){
       payload.monthlyRate = Number(document.getElementById('f_cMonthly').value)||0;
       payload.endDate = null; payload.dailyRate = 0; payload.totalAmount = 0;
@@ -1678,6 +1788,8 @@ function openContractForm(contract, prefill){
       payload.endDate = endDate;
       payload.dailyRate = Number(document.getElementById('f_cRate').value)||0;
       payload.totalAmount = Number(document.getElementById('f_cTotal').value)||0;
+      const lateFeeVal = document.getElementById('f_cLateFeeRate').value;
+      payload.lateFeeRate = lateFeeVal? Number(lateFeeVal) : payload.dailyRate;
     }
 
     // منع تأجير نفس السيارة لأكثر من عميل بنفس الوقت
@@ -2031,7 +2143,7 @@ function applyTheme(){
   document.body.classList.toggle('dark-mode', !!state.settings.darkMode);
 }
 applyTheme();
-const APP_BUILD_VERSION = 'BUILD-2026-10-09-C';
+const APP_BUILD_VERSION = 'BUILD-2026-10-10-D';
 const APP_LOCK_KEY = 'carRentalUnlocked_v1';
 function startApp(){
   setView('home');
