@@ -406,22 +406,20 @@ function getOwnersSummary(){
 }
 
 /* ================= عقود الإيجار الشهري ================= */
-/* الدورة = شهر ميلادي كامل يبدأ من يوم تاريخ البداية (مثال: بداية 5 يناير ← الدورة التالية 5 فبراير ← 5 مارس).
-   الدورة رقم n تبدأ في (تاريخ البداية + n شهر) وتنتهي في (تاريخ البداية + n+1 شهر).
-   لو يوم البداية 29/30/31 والشهر أقصر → يتجدد آخر يوم في الشهر، وبدون ما ينجرف اليوم بعدها (الحساب دايمًا من تاريخ البداية الأصلي).
-   كانت الدالة القديمة تحسب 30 يوم ثابتة، فكل شهر 31 يوم كان ينقص يوم (وكل سنة 5 أيام). */
+/* كل دورة = 30 يوم بالضبط من تاريخ البداية. الحساب بالأيام على تواريخ UTC (مو على كائنات Date محلية)
+   عشان التوقيت الصيفي ما يضيّع أو يزوّد يوم. */
+const CYCLE_DAYS = 30;
+function _dayNum(dateStr){ const p = dateStr.split('-').map(Number); return Math.round(Date.UTC(p[0], p[1]-1, p[2]) / 86400000); }
+function addDaysStr(dateStr, n){
+  const d = new Date((_dayNum(dateStr) + n) * 86400000);
+  return `${_pad(d.getUTCFullYear(),4)}-${_pad(d.getUTCMonth()+1)}-${_pad(d.getUTCDate())}`;
+}
 function monthlyCycle(contract, ref){
   ref = ref || todayStr();
   const start = /^\d{4}-\d{2}-\d{2}$/.test(contract.startDate||'') ? contract.startDate : ref;
-  let n = 0;
-  if(ref > start){
-    const a = start.split('-').map(Number), b = ref.split('-').map(Number);
-    n = Math.max(0, (b[0]*12 + b[1]) - (a[0]*12 + a[1]));
-    while(n>0 && addMonthsStr(start, n) > ref) n--;     // لو قدّرنا شهر زيادة
-    while(addMonthsStr(start, n+1) <= ref) n++;          // لو قدّرنا شهر ناقص
-  }
-  const cycleStartStr = addMonthsStr(start, n);
-  const cycleEndStr = addMonthsStr(start, n+1);
+  const n = ref > start ? Math.floor((_dayNum(ref) - _dayNum(start)) / CYCLE_DAYS) : 0;
+  const cycleStartStr = addDaysStr(start, n*CYCLE_DAYS);
+  const cycleEndStr = addDaysStr(start, (n+1)*CYCLE_DAYS);
   // الدورة الأولى تحسب كمان أي دفعة مقدّمة قبل تاريخ بداية العقد
   const lower = n===0 ? '0000-00-00' : cycleStartStr;
   const paid = state.payments.filter(p=>p.contractId===contract.id && p.date>=lower && p.date<cycleEndStr).reduce((s,p)=>s+Number(p.amount||0),0);
@@ -1749,7 +1747,7 @@ function openContractForm(contract, prefill){
 
     <div id="monthlyFields" style="display:none;">
       <div class="field"><label>الإيجار الشهري (${cur()})</label><input type="number" id="f_cMonthly" value="${p.monthlyRate||''}"></div>
-      <div class="notice">العقد يتجدد تلقائيًا كل شهر ميلادي في نفس يوم تاريخ البداية (مثال: بداية ٥ يناير ← التجديد ٥ فبراير ← ٥ مارس). لو البداية يوم ٢٩ أو ٣٠ أو ٣١ والشهر أقصر، يتجدد آخر يوم في الشهر. والبرنامج يتابع حالة الدفع لكل دورة لحالها.</div>
+      <div class="notice">العقد يتجدد تلقائيًا كل ٣٠ يومًا بالضبط من تاريخ البداية (مثال: بداية ١ أكتوبر ← التجديد ٣١ أكتوبر ← ٣٠ نوفمبر)، بغض النظر عن عدد أيام الشهر. والبرنامج يتابع حالة الدفع لكل دورة لحالها.</div>
     </div>
 
     <div class="row2">
@@ -1999,7 +1997,7 @@ function printContract(c){
   if(isMonthly){
     const cyc = monthlyCycle(c);
     rows = [
-      ['نوع العقد','شهري (يتجدد كل شهر ميلادي)'],
+      ['نوع العقد','شهري (يتجدد كل 30 يومًا)'],
       ['تاريخ البداية', fmtDate(c.startDate)],
       ['الإيجار الشهري', fmtMoney(c.monthlyRate)],
       ['مدفوع هذا الشهر', fmtMoney(cyc.paid)],
@@ -2215,7 +2213,7 @@ function applyTheme(){
   document.body.classList.toggle('dark-mode', !!state.settings.darkMode);
 }
 applyTheme();
-const APP_BUILD_VERSION = 'BUILD-2026-10-15-A';
+const APP_BUILD_VERSION = 'BUILD-2026-10-15-B';
 const APP_LOCK_KEY = 'carRentalUnlocked_v1';
 function startApp(){
   setView('home');
